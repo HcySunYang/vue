@@ -118,7 +118,7 @@ export function parseHTML (html, options) {
       }
 
       let text, rest, next
-      if (textEnd >= 0) {
+      if (textEnd > 0) {
         rest = html.slice(textEnd)
         while (
           !endTag.test(rest) &&
