@@ -81,12 +81,13 @@ export default {
   },
 
   render () {
-    const vnode: VNode = getFirstComponentChild(this.$slots.default)
+    const slot = this.$slots.default
+    const vnode: VNode = getFirstComponentChild(slot)
     const componentOptions: ?VNodeComponentOptions = vnode && vnode.componentOptions
     if (componentOptions) {
       // check pattern
       const name: ?string = getComponentName(componentOptions)
-      if (name && (
+      if (!name || (
         (this.exclude && matches(this.exclude, name)) ||
         (this.include && !matches(this.include, name))
       )) {
@@ -115,6 +116,6 @@ export default {
 
       vnode.data.keepAlive = true
     }
-    return vnode
+    return vnode || (slot && slot[0])
   }
 }
