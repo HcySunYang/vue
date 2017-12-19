@@ -23,22 +23,26 @@ export const onRE = /^@|^v-on:/
 export const dirRE = /^v-|^@|^:/
 export const forAliasRE = /(.*?)\s+(?:in|of)\s+(.*)/
 export const forIteratorRE = /,([^,\}\]]*)(?:,([^,\}\]]*))?$/
-const stripParensRE = /^\(|\)$/g
+export const stripParensRE = /^\(|\)$/g
 
 const argRE = /:(.*)$/
-const bindRE = /^:|^v-bind:/
+export const bindRE = /^:|^v-bind:/
 const modifierRE = /\.[^.]+/g
+
+const literalValueRE = /^(\{.*\}|\[.*\])$/
 
 const decodeHTMLCached = cached(he.decode)
 
 // configurable state
 export let warn: any
+let literalPropId
 let delimiters
 let transforms
 let preTransforms
 let postTransforms
 let platformIsPreTag
 let platformMustUseProp
+let platformIsReservedTag
 let platformGetTagNamespace
 
 type Attr = { name: string; value: string };
@@ -66,9 +70,11 @@ export function parse (
   options: CompilerOptions
 ): ASTElement | void {
   warn = options.warn || baseWarn
+  literalPropId = 0
 
   platformIsPreTag = options.isPreTag || no
   platformMustUseProp = options.mustUseProp || no
+  platformIsReservedTag = options.isReservedTag || no
   platformGetTagNamespace = options.getTagNamespace || no
 
   transforms = pluckModuleFunction(options.modules, 'transformNode')
@@ -92,13 +98,17 @@ export function parse (
     }
   }
 
-  function endPre (element) {
+  function closeElement (element) {
     // check pre state
     if (element.pre) {
       inVPre = false
     }
     if (platformIsPreTag(element.tag)) {
       inPre = false
+    }
+    // apply post-transforms
+    for (let i = 0; i < postTransforms.length; i++) {
+      postTransforms[i](element, options)
     }
   }
 
@@ -213,11 +223,7 @@ export function parse (
         currentParent = element
         stack.push(element)
       } else {
-        endPre(element)
-      }
-      // apply post-transforms
-      for (let i = 0; i < postTransforms.length; i++) {
-        postTransforms[i](element, options)
+        closeElement(element)
       }
     },
 
@@ -231,7 +237,7 @@ export function parse (
       // pop stack
       stack.length -= 1
       currentParent = stack[stack.length - 1]
-      endPre(element)
+      closeElement(element)
     },
 
     chars (text: string) {
@@ -263,11 +269,12 @@ export function parse (
         // only preserve whitespace if its not right after a starting tag
         : preserveWhitespace && children.length ? ' ' : ''
       if (text) {
-        let expression
-        if (!inVPre && text !== ' ' && (expression = parseText(text, delimiters))) {
+        let res
+        if (!inVPre && text !== ' ' && (res = parseText(text, delimiters))) {
           children.push({
             type: 2,
-            expression,
+            expression: res.expression,
+            tokens: res.tokens,
             text
           })
         } else if (text !== ' ' || !children.length || children[children.length - 1].text !== ' ') {
@@ -529,6 +536,15 @@ function processAttrs (el) {
             )
           }
         }
+        // optimize literal values in component props by wrapping them
+        // in an inline watcher to avoid unnecessary re-renders
+        if (
+          !platformIsReservedTag(el.tag) &&
+          el.tag !== 'slot' &&
+          literalValueRE.test(value.trim())
+        ) {
+          value = `_a(${literalPropId++},function(){return ${value}})`
+        }
         if (isProp || (
           !el.component && platformMustUseProp(el.tag, el.attrsMap.type, name)
         )) {
@@ -555,8 +571,8 @@ function processAttrs (el) {
     } else {
       // literal attribute
       if (process.env.NODE_ENV !== 'production') {
-        const expression = parseText(value, delimiters)
-        if (expression) {
+        const res = parseText(value, delimiters)
+        if (res) {
           warn(
             `${name}="${value}": ` +
             'Interpolation inside attributes has been removed. ' +

@@ -260,8 +260,7 @@ export function validateComponentName (name: string) {
       'and must start with a letter.'
     )
   }
-  const lower = name.toLowerCase()
-  if (isBuiltInTag(lower) || config.isReservedTag(lower)) {
+  if (isBuiltInTag(name) || config.isReservedTag(name)) {
     warn(
       'Do not use built-in or reserved HTML elements as component ' +
       'id: ' + name
@@ -293,6 +292,9 @@ function normalizeProps (options: Object, vm: ?Component) {
     for (const key in props) {
       val = props[key]
       name = camelize(key)
+      if (process.env.NODE_ENV !== 'production' && isPlainObject(val)) {
+        validatePropObject(name, val, vm)
+      }
       res[name] = isPlainObject(val)
         ? val
         : { type: val }
@@ -308,10 +310,31 @@ function normalizeProps (options: Object, vm: ?Component) {
 }
 
 /**
+ * Validate whether a prop object keys are valid.
+ */
+const propOptionsRE = /^(type|default|required|validator)$/
+
+function validatePropObject (
+  propName: string,
+  prop: Object,
+  vm: ?Component
+) {
+  for (const key in prop) {
+    if (!propOptionsRE.test(key)) {
+      warn(
+        `Invalid key "${key}" in validation rules object for prop "${propName}".`,
+        vm
+      )
+    }
+  }
+}
+
+/**
  * Normalize all injections into Object-based format
  */
 function normalizeInject (options: Object, vm: ?Component) {
   const inject = options.inject
+  if (!inject) return
   const normalized = options.inject = {}
   if (Array.isArray(inject)) {
     for (let i = 0; i < inject.length; i++) {
@@ -324,7 +347,7 @@ function normalizeInject (options: Object, vm: ?Component) {
         ? extend({ from: key }, val)
         : { from: val }
     }
-  } else if (process.env.NODE_ENV !== 'production' && inject) {
+  } else if (process.env.NODE_ENV !== 'production') {
     warn(
       `Invalid value for option "inject": expected an Array or an Object, ` +
       `but got ${toRawType(inject)}.`,
