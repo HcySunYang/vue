@@ -4,8 +4,8 @@ import he from 'he'
 import { parseHTML } from './html-parser'
 import { parseText } from './text-parser'
 import { parseFilters } from './filter-parser'
-import { cached, no, camelize } from 'shared/util'
 import { genAssignmentCode } from '../directives/model'
+import { extend, cached, no, camelize } from 'shared/util'
 import { isIE, isEdge, isServerRendering } from 'core/util/env'
 
 import {
@@ -23,26 +23,22 @@ export const onRE = /^@|^v-on:/
 export const dirRE = /^v-|^@|^:/
 export const forAliasRE = /(.*?)\s+(?:in|of)\s+(.*)/
 export const forIteratorRE = /,([^,\}\]]*)(?:,([^,\}\]]*))?$/
-export const stripParensRE = /^\(|\)$/g
+const stripParensRE = /^\(|\)$/g
 
 const argRE = /:(.*)$/
 export const bindRE = /^:|^v-bind:/
 const modifierRE = /\.[^.]+/g
 
-const literalValueRE = /^(\{.*\}|\[.*\])$/
-
 const decodeHTMLCached = cached(he.decode)
 
 // configurable state
 export let warn: any
-let literalPropId
 let delimiters
 let transforms
 let preTransforms
 let postTransforms
 let platformIsPreTag
 let platformMustUseProp
-let platformIsReservedTag
 let platformGetTagNamespace
 
 type Attr = { name: string; value: string };
@@ -70,11 +66,9 @@ export function parse (
   options: CompilerOptions
 ): ASTElement | void {
   warn = options.warn || baseWarn
-  literalPropId = 0
 
   platformIsPreTag = options.isPreTag || no
   platformMustUseProp = options.mustUseProp || no
-  platformIsReservedTag = options.isReservedTag || no
   platformGetTagNamespace = options.getTagNamespace || no
 
   transforms = pluckModuleFunction(options.modules, 'transformNode')
@@ -355,26 +349,41 @@ function processRef (el) {
 export function processFor (el: ASTElement) {
   let exp
   if ((exp = getAndRemoveAttr(el, 'v-for'))) {
-    const inMatch = exp.match(forAliasRE)
-    if (!inMatch) {
-      process.env.NODE_ENV !== 'production' && warn(
+    const res = parseFor(exp)
+    if (res) {
+      extend(el, res)
+    } else if (process.env.NODE_ENV !== 'production') {
+      warn(
         `Invalid v-for expression: ${exp}`
       )
-      return
-    }
-    el.for = inMatch[2].trim()
-    const alias = inMatch[1].trim().replace(stripParensRE, '')
-    const iteratorMatch = alias.match(forIteratorRE)
-    if (iteratorMatch) {
-      el.alias = alias.replace(forIteratorRE, '')
-      el.iterator1 = iteratorMatch[1].trim()
-      if (iteratorMatch[2]) {
-        el.iterator2 = iteratorMatch[2].trim()
-      }
-    } else {
-      el.alias = alias
     }
   }
+}
+
+type ForParseResult = {
+  for: string;
+  alias: string;
+  iterator1?: string;
+  iterator2?: string;
+};
+
+export function parseFor (exp: string): ?ForParseResult {
+  const inMatch = exp.match(forAliasRE)
+  if (!inMatch) return
+  const res = {}
+  res.for = inMatch[2].trim()
+  const alias = inMatch[1].trim().replace(stripParensRE, '')
+  const iteratorMatch = alias.match(forIteratorRE)
+  if (iteratorMatch) {
+    res.alias = alias.replace(forIteratorRE, '')
+    res.iterator1 = iteratorMatch[1].trim()
+    if (iteratorMatch[2]) {
+      res.iterator2 = iteratorMatch[2].trim()
+    }
+  } else {
+    res.alias = alias
+  }
+  return res
 }
 
 function processIf (el) {
@@ -535,15 +544,6 @@ function processAttrs (el) {
               genAssignmentCode(value, `$event`)
             )
           }
-        }
-        // optimize literal values in component props by wrapping them
-        // in an inline watcher to avoid unnecessary re-renders
-        if (
-          !platformIsReservedTag(el.tag) &&
-          el.tag !== 'slot' &&
-          literalValueRE.test(value.trim())
-        ) {
-          value = `_a(${literalPropId++},function(){return ${value}})`
         }
         if (isProp || (
           !el.component && platformMustUseProp(el.tag, el.attrsMap.type, name)
