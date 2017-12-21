@@ -3,12 +3,14 @@
 import config from '../config'
 import VNode, { createEmptyVNode } from './vnode'
 import { createComponent } from './create-component'
+import { traverse } from '../observer/traverse'
 
 import {
   warn,
   isDef,
   isUndef,
   isTrue,
+  isObject,
   isPrimitive,
   resolveAsset
 } from '../util/index'
@@ -30,7 +32,7 @@ export function createElement (
   children: any,
   normalizationType: any,
   alwaysNormalize: boolean
-): VNode {
+): VNode | Array<VNode> {
   if (Array.isArray(data) || isPrimitive(data)) {
     normalizationType = children
     children = data
@@ -48,7 +50,7 @@ export function _createElement (
   data?: VNodeData,
   children?: any,
   normalizationType?: number
-): VNode {
+): VNode | Array<VNode> {
   if (isDef(data) && isDef((data: any).__ob__)) {
     process.env.NODE_ENV !== 'production' && warn(
       `Avoid using observed data object as vnode data: ${JSON.stringify(data)}\n` +
@@ -116,8 +118,11 @@ export function _createElement (
     // direct component options / constructor
     vnode = createComponent(tag, data, context, children)
   }
-  if (isDef(vnode)) {
-    if (ns) applyNS(vnode, ns)
+  if (Array.isArray(vnode)) {
+    return vnode
+  } else if (isDef(vnode)) {
+    if (isDef(ns)) applyNS(vnode, ns)
+    if (isDef(data)) registerDeepBindings(data)
     return vnode
   } else {
     return createEmptyVNode()
@@ -138,5 +143,17 @@ function applyNS (vnode, ns, force) {
         applyNS(child, ns, force)
       }
     }
+  }
+}
+
+// ref #5318
+// necessary to ensure parent re-render when deep bindings like :style and
+// :class are used on slot nodes
+function registerDeepBindings (data) {
+  if (isObject(data.style)) {
+    traverse(data.style)
+  }
+  if (isObject(data.class)) {
+    traverse(data.class)
   }
 }
